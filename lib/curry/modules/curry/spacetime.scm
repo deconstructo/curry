@@ -93,13 +93,13 @@
       (let loop ((e expr) (vs vars) (xs values))
         (cond ((null? vs) e)
               ((null? xs) (error "make-metric: too many parameters to check symmetry"))
-              (else (loop (if (number? e) e (substitute e (car vs) (car xs))) (cdr vs) (cdr xs))))))
+              (else (loop (if (symbolic? e) (substitute e (car vs) (car xs)) e) (cdr vs) (cdr xs))))))
 
     (define (numerically-equal? a b vars)
       (let loop ((pts sample-points))
         (or (null? pts)
             (let ((va (evaluate-at a vars (car pts))) (vb (evaluate-at b vars (car pts))))
-              (and (number? va) (number? vb)
+              (and (number? va) (not (symbolic? va)) (number? vb) (not (symbolic? vb))
                    (<= (magnitude (- va vb)) (* 1e-9 (max 1.0 (magnitude va) (magnitude vb))))
                    (loop (cdr pts)))))))
 
@@ -150,7 +150,7 @@
              (r (sqrt (+ (* X X) (* Y Y) (* Z Z)))))
         (kerr-schild-metric (/ (* 2 M) r)
                             (list 1 (/ X r) (/ Y r) (/ Z r))
-                            (if (number? M) '() (list M)))))
+                            (if (symbolic? M) (list M) '()))))
 
     ;; Charged, non-rotating: f = (2Mr - Q^2) / r^2.
     (define (reissner-nordstrom-metric . opt)

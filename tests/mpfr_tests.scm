@@ -299,7 +299,7 @@
 (check-pred "mpfr - x is symbolic" (symbolic? (- (mpfr 1/3) mx)))
 (check-approx "(x*mpfr + 1) at x=3" (substitute (+ (* mx (mpfr 1/3)) 1) mx 3) 2.0 1e-12)
 (check-approx "d/dx of mpfr*x^2 at x=3" (substitute (∂ (* (mpfr 1/3) (expt mx 2)) mx) mx 3) 2.0 1e-12)
-(check "mpfr < x is a relation, not an error" (symbolic? (< (mpfr 1) mx)) #t)
+(check "mpfr sym< x is a relation, not an error" (symbolic? (sym< (mpfr 1) mx)) #t)
 
 ;; Surreal.
 (check "mpfr + surreal" (= (+ (mpfr 1) (make-surreal '((0 . 3)))) 4) #t)

@@ -240,11 +240,19 @@ PRED1(symbol_p,   vis_symbol)
 PRED1(string_p,   vis_string)
 PRED1(char_p,     vis_char)
 PRED1(vector_p,   vis_vector)
-PRED1(number_p,   vis_number)
-PRED1(integer_p,  num_is_integer)
-PRED1(rational_p, num_is_rational)
-PRED1(real_p,     num_is_real)
-PRED1(complex_p,  vis_number)
+/* A symbolic value is a number (#437); it is real, rational or an integer only
+ * where an assumption on the variable says so. */
+static bool sx_number_p(val_t v)   { return vis_number(v) || vis_symbolic(v); }
+static bool sx_real_p(val_t v)     { return num_is_real(v) || sym_is_real(v); }
+static bool sx_integer_p(val_t v)  {
+    return num_is_integer(v) || (vis_symvar(v) && (sym_var_flags(v) & SYM_ASSUME_INTEGER));
+}
+static bool sx_rational_p(val_t v) { return num_is_rational(v) || sx_integer_p(v); }
+PRED1(number_p,   sx_number_p)
+PRED1(integer_p,  sx_integer_p)
+PRED1(rational_p, sx_rational_p)
+PRED1(real_p,     sx_real_p)
+PRED1(complex_p,  sx_number_p)
 /* A complex number is exact when both parts are, inexact when either is not;
  * a quaternion or octonion holds doubles, so it is inexact. The surreal,
  * symbolic and multivector types are neither (as before). */
@@ -424,8 +432,19 @@ static val_t prim_lang_translate(int ac, val_t *av, void *ud) {
     return vis_symbol(av[0]) ? lang_translate(av[0]) : av[0];
 }
 static val_t prim_zero_p(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return vbool(num_is_zero(av[0])); }
-static val_t prim_positive_p(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return vbool(num_is_positive(av[0])); }
-static val_t prim_negative_p(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return vbool(num_is_negative(av[0])); }
+/* positive? / negative? of a symbolic value ask about its assumption: #t when the
+ * variable is declared so, #f otherwise (rewrite-rule guards such as
+ * #:when (positive? ?v) depend on #f for an unassumed variable). */
+static val_t prim_positive_p(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (vis_symbolic(av[0])) return vbool(sym_is_positive(av[0]));
+    return vbool(num_is_positive(av[0]));
+}
+static val_t prim_negative_p(int ac, val_t *av, void *ud) {
+    (void)ac;(void)ud;
+    if (vis_symbolic(av[0])) return vbool(sym_is_negative(av[0]));
+    return vbool(num_is_negative(av[0]));
+}
 static val_t prim_nan_p(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return vbool(num_is_nan(av[0])); }
 static val_t prim_infinite_p(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return vbool(num_is_infinite(av[0])); }
 
@@ -721,7 +740,12 @@ val_t prim_num_##fn(int ac, val_t *av, void *ud) { \
      * vis_symbolic checks below and nothing more, rather than also
      * paying for the 3+-arg scan on every call. */ \
     if (ac == 2) { \
-        if (vis_symbolic(av[0]) || vis_symbolic(av[1])) return sx_##op(av[0], av[1]); \
+        if (vis_symbolic(av[0]) || vis_symbolic(av[1])) { \
+            val_t r = sx_##op(av[0], av[1]); \
+            if (r == V_TRUE || r == V_FALSE) return r; \
+            scm_raise(V_FALSE, name ": cannot decide a comparison with a symbolic value; " \
+                      "use sym" name " to build the relation"); \
+        } \
         if (!(vis_fixnum(av[0]) && vis_fixnum(av[1]))) num_check_ordered(av[0], av[1], name); \
         return vbool(num_##op(av[0], av[1])); \
     } \
@@ -740,6 +764,12 @@ val_t prim_num_##fn(int ac, val_t *av, void *ud) { \
     for (int i=1;i<ac;i++) if (!num_##op(av[i-1],av[i])) return V_FALSE; \
     return V_TRUE; }
 NUM_CMP_ORD(lt,lt,"<") NUM_CMP_ORD(le,le,"<=") NUM_CMP_ORD(gt,gt,">") NUM_CMP_ORD(ge,ge,">=")
+
+/* The relation itself, for whoever wants the expression and not a decision. */
+static val_t prim_sym_lt(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return sx_lt(av[0], av[1]); }
+static val_t prim_sym_le(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return sx_le(av[0], av[1]); }
+static val_t prim_sym_gt(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return sx_gt(av[0], av[1]); }
+static val_t prim_sym_ge(int ac, val_t *av, void *ud) { (void)ac;(void)ud; return sx_ge(av[0], av[1]); }
 
 static val_t prim_max(int ac, val_t *av, void *ud) {(void)ud; val_t r=av[0]; for(int i=1;i<ac;i++) r=num_max(r,av[i]); return r;}
 static val_t prim_min(int ac, val_t *av, void *ud) {(void)ud; val_t r=av[0]; for(int i=1;i<ac;i++) r=num_min(r,av[i]); return r;}
@@ -4128,6 +4158,8 @@ void builtins_register(val_t env) {
     /* Arithmetic */
     DEF("+",  prim_add, 0,-1); DEF("-",  prim_sub, 1,-1);
     DEF("*",  prim_mul, 0,-1); DEF("/",  prim_div, 1,-1);
+    DEF("sym<", prim_sym_lt, 2,2); DEF("sym<=", prim_sym_le, 2,2);
+    DEF("sym>", prim_sym_gt, 2,2); DEF("sym>=", prim_sym_ge, 2,2);
     DEF("=",  prim_num_eq,  2,-1); DEF("<",  prim_num_lt,  2,-1);
     DEF("<=", prim_num_le,  2,-1); DEF(">",  prim_num_gt,  2,-1);
     DEF(">=", prim_num_ge,  2,-1);

@@ -157,9 +157,9 @@
 
     ;; Leaf: number, variable, or sym-fn application.  Returns a string.
     (define (emit-leaf x var-map)
-      (cond ((and (number? x) (real? x)) (glsl-float x))
+      (cond ((sym-var? x) (lookup-name (sym-var-name x) var-map "variable"))
+            ((and (number? x) (real? x)) (glsl-float x))
             ((number? x) (error "sym->glsl: complex and hypercomplex numbers are not supported" x))
-            ((sym-var? x) (lookup-name (sym-var-name x) var-map "variable"))
             (else (error "sym->glsl: not a symbolic expression or real number" x))))
 
     ;; Generic walk.  Returns (key . code): key is the node's full text with

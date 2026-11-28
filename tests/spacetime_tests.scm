@@ -80,7 +80,7 @@
 (define (eval-at expr point params)
   ;; point: (t x y z); params: alist of (sym-var . value)
   (let loop ((e expr) (vs (append coords (map car params))) (xs (append point (map cdr params))))
-    (if (or (null? vs) (number? e)) e (loop (substitute e (car vs) (car xs)) (cdr vs) (cdr xs)))))
+    (if (or (null? vs) (not (symbolic? e))) e (loop (substitute e (car vs) (car xs)) (cdr vs) (cdr xs)))))
 
 (define kerr (kerr-metric))
 (define kerr-params (map (lambda (p) (cons p (if (eq? (sym-var-name p) 'M) 1.0 0.9))) (metric-parameters kerr)))

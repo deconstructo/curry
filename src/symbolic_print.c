@@ -30,6 +30,16 @@ static bool sp_is_cmp_op(val_t op) {
     return op == SX_LT || op == SX_LE || op == SX_GT || op == SX_GE;
 }
 
+/* floor, ceiling, round, truncate, max, min print as function calls */
+static bool sp_is_rounder_op(val_t op) {
+    return op == SX_FLOOR || op == SX_CEILING || op == SX_ROUND ||
+           op == SX_TRUNCATE || op == SX_MAX || op == SX_MIN;
+}
+static const char *sp_rounder_name(val_t op) {
+    return op == SX_FLOOR ? "floor" : op == SX_CEILING ? "ceiling" : op == SX_ROUND ? "round" :
+           op == SX_TRUNCATE ? "truncate" : op == SX_MAX ? "max" : "min";
+}
+
 static int sp_prec(val_t v) {
     if (!vis_symexpr(v)) return SP_ATOM;
     val_t op = as_symexpr(v)->op;
@@ -217,6 +227,10 @@ static void sp_infix(val_t expr, int ctx, val_t port) {
         pws(port, "csc("); sp_infix(a[0], SP_LOW, port); port_write_char(port, ')');
     } else if (op == SX_SIGN && n == 1) {
         pws(port, "sign("); sp_infix(a[0], SP_LOW, port); port_write_char(port, ')');
+    } else if (sp_is_rounder_op(op)) {
+        pws(port, sp_rounder_name(op)); port_write_char(port, '(');
+        for (int i = 0; i < n; i++) { if (i) pws(port, ", "); sp_infix(a[i], SP_LOW, port); }
+        port_write_char(port, ')');
     } else if (sp_is_cmp_op(op) && n == 2) {
         sp_infix(a[0], SP_ADD, port);
         if (op == SX_LT) pws(port, " < ");
@@ -702,6 +716,10 @@ static void sl_latex(val_t expr, int ctx, val_t port) {
         pws(port, "\\csc\\!\\left("); sl_latex(a[0], SP_LOW, port); pws(port, "\\right)");
     } else if (op == SX_SIGN && n == 1) {
         pws(port, "\\operatorname{sign}\\!\\left("); sl_latex(a[0], SP_LOW, port); pws(port, "\\right)");
+    } else if (sp_is_rounder_op(op)) {
+        pws(port, "\\operatorname{"); pws(port, sp_rounder_name(op)); pws(port, "}\\!\\left(");
+        for (int i = 0; i < n; i++) { if (i) pws(port, ", "); sl_latex(a[i], SP_LOW, port); }
+        pws(port, "\\right)");
     } else if (sp_is_cmp_op(op) && n == 2) {
         sl_latex(a[0], SP_ADD, port);
         if (op == SX_LT) pws(port, " < ");

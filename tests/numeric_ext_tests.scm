@@ -721,9 +721,9 @@
 (check "> both numeric"       (> 5 3) #t)
 
 ;;; symbolic, undecidable -- stays a symbolic comparison node
-(check "< with plain sym-var stays symbolic" (symbolic? (< x 5)) #t)
-(check "< with plain sym-var round-trips through simplify"
-  (equal? (simplify (< x 5)) (< x 5)) #t)
+(check "sym< with plain sym-var stays symbolic" (symbolic? (sym< x 5)) #t)
+(check "sym< with plain sym-var round-trips through simplify"
+  (equal? (simplify (sym< x 5)) (sym< x 5)) #t)
 
 ;;; reflexive: identical expressions on both sides
 (check "< x x = #f"  (< x x) #f)
@@ -745,12 +745,18 @@
 (check "xn < 5"  (< xn 5) #t)
 
 ;;; a variable with no sign assumption compared to a number: still undecidable
-(check "x > 0 with no assumption stays symbolic" (symbolic? (> x 0)) #t)
+(check "x > 0 with no assumption stays symbolic with sym>" (symbolic? (sym> x 0)) #t)
+;;; ... and with > it raises instead of giving a truthy relation (#437)
+(check "x > 0 with no assumption raises" (guard (e (#t 'raised)) (> x 0)) 'raised)
+(check "an if on an undecidable comparison raises, not takes the true branch"
+  (guard (e (#t 'raised)) (if (< x 1) 'a 'b)) 'raised)
+(check "(< x 1) raises with the name of the explicit form"
+  (number? (string-contains (guard (e (#t (condition-message e))) (< x 1)) "use sym<")) #t)
 
 ;;; identical inequality expressions built twice are equal? (consistent
 ;;; node structure, not e.g. fresh unhashable objects each time)
 (check "two identically-built inequalities are equal?"
-  (equal? (< x 5) (< x 5)) #t)
+  (equal? (sym< x 5) (sym< x 5)) #t)
 
 ;;; 3+-argument symbolic chains are explicitly unsupported -- clear
 ;;; error, not num_cmp's confusing "exact integer required". The error
@@ -789,37 +795,37 @@
 ;;; in docs/reference/symbolic.md). Note: xp and xn above are both named
 ;;; 'x (only their assumption flags differ), so sx_equal's name-only
 ;;; equality check (existing behavior, not new) treats them as the SAME
-;;; variable -- (< xp xn) hits the *reflexive* case, not this one. A
+;;; variable -- (sym< xp xn) hits the *reflexive* case, not this one. A
 ;;; genuinely different name is needed to test the undecidable case.
 (define xw (sym-var 'w 'negative))
 (check "sign-flagged var vs. differently-named sign-flagged var stays symbolic"
-  (symbolic? (< xp xw)) #t)
+  (symbolic? (sym< xp xw)) #t)
 
 ;;; comparison display
-(check "< infix"  (equal? (sym->infix (< x 5)) "x < 5") #t)
-(check "<= infix" (equal? (sym->infix (<= x 5)) "x <= 5") #t)
-(check "> infix"  (equal? (sym->infix (> x 5)) "x > 5") #t)
-(check ">= infix" (equal? (sym->infix (>= x 5)) "x >= 5") #t)
-(check "< latex"  (equal? (sym->latex (< x 5)) "x < 5") #t)
-(check "<= latex" (equal? (sym->latex (<= x 5)) "x \\leq 5") #t)
-(check "> latex"  (equal? (sym->latex (> x 5)) "x > 5") #t)
-(check ">= latex" (equal? (sym->latex (>= x 5)) "x \\geq 5") #t)
+(check "< infix"  (equal? (sym->infix (sym< x 5)) "x < 5") #t)
+(check "<= infix" (equal? (sym->infix (sym<= x 5)) "x <= 5") #t)
+(check "> infix"  (equal? (sym->infix (sym> x 5)) "x > 5") #t)
+(check ">= infix" (equal? (sym->infix (sym>= x 5)) "x >= 5") #t)
+(check "< latex"  (equal? (sym->latex (sym< x 5)) "x < 5") #t)
+(check "<= latex" (equal? (sym->latex (sym<= x 5)) "x \\leq 5") #t)
+(check "> latex"  (equal? (sym->latex (sym> x 5)) "x > 5") #t)
+(check ">= latex" (equal? (sym->latex (sym>= x 5)) "x \\geq 5") #t)
 
 ;;; printer parenthesization when a comparison is nested inside
 ;;; arithmetic (comparisons bind loosest) -- verified correct by
 ;;; independent code review, added here so it can't silently regress.
 (check "comparison nested inside + gets parens (infix)"
-  (equal? (sym->infix (+ 1 (< x y))) "1 + (x < y)") #t)
+  (equal? (sym->infix (+ 1 (sym< x y))) "1 + (x < y)") #t)
 (check "comparison nested inside * gets parens (infix)"
-  (equal? (sym->infix (* 2 (< x y))) "2 * (x < y)") #t)
+  (equal? (sym->infix (* 2 (sym< x y))) "2 * (x < y)") #t)
 (check "comparison nested inside unary - gets parens (infix)"
-  (equal? (sym->infix (- (< x y))) "-(x < y)") #t)
+  (equal? (sym->infix (- (sym< x y))) "-(x < y)") #t)
 (check "comparison's own operands don't get spurious parens when they're sums (infix)"
-  (equal? (sym->infix (< (+ x 1) y)) "1 + x < y") #t)
+  (equal? (sym->infix (sym< (+ x 1) y)) "1 + x < y") #t)
 
 ;;; sym->markdown -- wraps sym->latex in $...$ / $$...$$
-(check "sym->markdown inline"  (equal? (sym->markdown (< x 5)) "$x < 5$") #t)
-(check "sym->markdown display" (equal? (sym->markdown (< x 5) 'display) "$$x < 5$$") #t)
+(check "sym->markdown inline"  (equal? (sym->markdown (sym< x 5)) "$x < 5$") #t)
+(check "sym->markdown display" (equal? (sym->markdown (sym< x 5) 'display) "$$x < 5$$") #t)
 (check "sym->markdown rejects a bad second arg"
   (guard (e (#t 'raised)) (sym->markdown (< x 5) 'block) 'not-raised)
   'raised)
@@ -1242,7 +1248,7 @@
 (check "latex: caret tilde percent hash ampersand"
        (latex-of "a^b~c%d#e&f") "1 + a\\hat{}b\\sim c\\%d\\#e\\&f")
 (check "latex: a string leaf is set upright and escaped"
-       (sym->latex (+ x "a$b_c")) "x + \\mathrm{a\\$b\\_c}")
+       (sym->latex (sym-expr (quote +) x "a$b_c")) "x + \\mathrm{a\\$b\\_c}")
 (check "latex: +inf.0 leaf" (sym->latex (* x +inf.0)) "\\infty x")
 (check "latex: -inf.0 leaf" (sym->latex (* x -inf.0)) "-\\infty x")
 (check "latex: +nan.0 leaf" (sym->latex (+ x +nan.0)) "\\mathrm{NaN} + x")

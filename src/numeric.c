@@ -256,6 +256,7 @@ long num_to_long(val_t v) {
 
 val_t num_inexact(val_t v) {
     if (vis_flonum(v)) return v;
+    if (vis_symbolic(v)) return sx_inexact(v);
     /* Each part: (inexact 1+2i) is 1.0+2.0i, not the real part alone (#386). */
     if (vis_complex(v)) {
         check_c_stack_depth("numeric");    /* make-rectangular accepts complex parts */
@@ -275,6 +276,7 @@ val_t num_inexact(val_t v) {
 }
 
 val_t num_exact(val_t v) {
+    if (vis_symbolic(v)) return sx_exact(v);
     /* Each part: (exact 1.5+2.5i) is 3/2+5/2i, not left as it was (#386). */
     if (vis_complex(v)) {
         check_c_stack_depth("numeric");
@@ -526,6 +528,21 @@ static inline bool mpfr_real_operand(val_t v) {
 }
 #define MPFR_PAIR(a, b) ((vis_mpfr(a) || vis_mpfr(b)) && mpfr_real_operand(a) && mpfr_real_operand(b))
 
+/* max/min/floor build a node only around a number or a symbolic value. */
+static val_t sx_ordered_operand(val_t v, const char *who) {
+    if (!(vis_number(v) || vis_symbolic(v))) scm_raise(V_FALSE, "%s: not a number", who);
+    return v;
+}
+
+/* An operand of arithmetic with a symbolic value must be something arithmetic
+ * can be done on: (+ x "a") is an error, not an expression (#437). */
+static val_t sx_operand(val_t v, const char *who) {
+    if (vis_string(v) || vis_char(v) || vis_symbol(v) || vis_bool(v) ||
+        vis_nil(v) || vis_void(v) || vis_pair(v) || vis_vector(v))
+        scm_raise(V_FALSE, "%s: not a number", who);
+    return v;
+}
+
 val_t num_add(val_t a, val_t b) {
     /* Fast paths: fixnum check is a single tag-bit test (no memory dereference);
      * flonum check requires loading the type header — so fixnum always goes first. */
@@ -546,7 +563,7 @@ val_t num_add(val_t a, val_t b) {
             scm_raise(V_FALSE, "tuple +: cannot add tuple with non-zero scalar");
         return tuple_binop(a, b, num_add, "+");
     }
-    if (vis_symbolic(a) || vis_symbolic(b)) return sx_add(a, b);
+    if (vis_symbolic(a) || vis_symbolic(b)) return sx_add(sx_operand(a, "+"), sx_operand(b, "+"));
     if (vis_quantum(a) || vis_quantum(b)) {
         if (vis_quantum(a) && vis_quantum(b)) return quantum_superpose(a, b);
         return vis_quantum(a) ? quantum_add_scalar(a, b) : quantum_add_scalar(b, a);
@@ -622,7 +639,7 @@ val_t num_sub(val_t a, val_t b) {
             scm_raise(V_FALSE, "tuple -: cannot subtract tuple and non-zero scalar");
         return tuple_binop(a, b, num_sub, "-");
     }
-    if (vis_symbolic(a) || vis_symbolic(b)) return sx_sub(a, b);
+    if (vis_symbolic(a) || vis_symbolic(b)) return sx_sub(sx_operand(a, "-"), sx_operand(b, "-"));
     if (vis_quantum(a) || vis_quantum(b)) {
         if (vis_quantum(a) && vis_quantum(b)) return quantum_superpose(a, quantum_mul_scalar(b, vfix(-1)));
         return vis_quantum(a) ? quantum_sub_scalar(a, b) : quantum_sub_scalar(b, num_neg(a));
@@ -708,7 +725,7 @@ val_t num_mul(val_t a, val_t b) {
         for (uint32_t i = 0; i < n; i++) buf[i] = num_mul(scalar, t->data[i]);
         return num_make_tuple((int)t->hdr.type, n, buf);
     }
-    if (vis_symbolic(a) || vis_symbolic(b)) return sx_mul(a, b);
+    if (vis_symbolic(a) || vis_symbolic(b)) return sx_mul(sx_operand(a, "*"), sx_operand(b, "*"));
     if (vis_quantum(a) || vis_quantum(b)) {
         if (vis_quantum(a) && vis_quantum(b)) return quantum_superpose(a, b);
         return vis_quantum(a) ? quantum_mul_scalar(a, b) : quantum_mul_scalar(b, a);
@@ -770,7 +787,7 @@ val_t num_div(val_t a, val_t b) {
         if (vis_flonum(b)) return num_make_float(vfloat(a) / vfloat(b));
     }
     if (MPFR_PAIR(a, b)) return mpfr_num_div(a, b);
-    if (vis_symbolic(a) || vis_symbolic(b)) return sx_div(a, b);
+    if (vis_symbolic(a) || vis_symbolic(b)) return sx_div(sx_operand(a, "/"), sx_operand(b, "/"));
     if (vis_quantum(a) || vis_quantum(b)) {
         if (vis_quantum(a) && !vis_quantum(b)) return quantum_div_scalar(a, b);
         scm_raise(V_FALSE, "cannot divide by a quantum value");
@@ -913,7 +930,12 @@ static inline bool num_unordered(val_t a, val_t b) {
     if (vis_fixnum(a) && vis_fixnum(b)) return false;
     return num_is_nan(a) || num_is_nan(b);
 }
-bool num_eq(val_t a, val_t b) { return num_cmp(a,b)==0 && !num_unordered(a,b); }
+/* A symbolic value is equal to what is structurally identical to it: (= x x) is
+ * #t, (= x 1) is #f (#437). Whether x could equal 1 is not what = asks. */
+bool num_eq(val_t a, val_t b) {
+    if (vis_symbolic(a) || vis_symbolic(b)) return sx_equal(a, b);
+    return num_cmp(a,b)==0 && !num_unordered(a,b);
+}
 bool num_lt(val_t a, val_t b) { return num_cmp(a,b)<0  && !num_unordered(a,b); }
 bool num_le(val_t a, val_t b) { return num_cmp(a,b)<=0 && !num_unordered(a,b); }
 bool num_gt(val_t a, val_t b) { return num_cmp(a,b)>0  && !num_unordered(a,b); }
@@ -930,6 +952,7 @@ static val_t minmax_inexact(val_t result, val_t other) {
 /* min and max return a NaN argument rather than let the comparison pick
  * whichever side it lands on, so the result doesn't depend on order. */
 val_t num_min(val_t a, val_t b) {
+    if (vis_symbolic(a) || vis_symbolic(b)) return sx_min(sx_ordered_operand(a, "min"), sx_ordered_operand(b, "min"));
     if (vis_complex(a) || vis_complex(b))
         scm_raise(V_FALSE, "no ordering on complex numbers");
     int c = num_cmp(a,b);
@@ -938,6 +961,7 @@ val_t num_min(val_t a, val_t b) {
     return c<=0 ? minmax_inexact(a, b) : minmax_inexact(b, a);
 }
 val_t num_max(val_t a, val_t b) {
+    if (vis_symbolic(a) || vis_symbolic(b)) return sx_max(sx_ordered_operand(a, "max"), sx_ordered_operand(b, "max"));
     if (vis_complex(a) || vis_complex(b))
         scm_raise(V_FALSE, "no ordering on complex numbers");
     int c = num_cmp(a,b);
@@ -1050,6 +1074,7 @@ SUR_DERIV(d_atanh, num_div(ONE, num_sub(ONE, num_mul(x, x))))
 #undef ONE
 
 val_t num_floor(val_t v) {
+    if (vis_symbolic(v)) return sx_floor(v);
     if (vis_complex(v)) scm_raise(V_FALSE, "no ordering on complex numbers");
     if (vis_surreal(v)) return sur_step(v, num_floor);
     if (vis_mpfr(v))  return mpfr_num_floor(v);
@@ -1062,6 +1087,7 @@ val_t num_floor(val_t v) {
     return v; /* fixnum/bignum already exact integer */
 }
 val_t num_ceiling(val_t v) {
+    if (vis_symbolic(v)) return sx_ceiling(v);
     if (vis_complex(v)) scm_raise(V_FALSE, "no ordering on complex numbers");
     if (vis_surreal(v)) return sur_step(v, num_ceiling);
     if (vis_mpfr(v))  return mpfr_num_ceiling(v);
@@ -1074,6 +1100,7 @@ val_t num_ceiling(val_t v) {
     return v;
 }
 val_t num_truncate(val_t v) {
+    if (vis_symbolic(v)) return sx_truncate(v);
     if (vis_complex(v)) scm_raise(V_FALSE, "no ordering on complex numbers");
     if (vis_surreal(v)) return sur_step(v, num_truncate);
     if (vis_mpfr(v))  return mpfr_num_truncate(v);
@@ -1086,6 +1113,7 @@ val_t num_truncate(val_t v) {
     return v;
 }
 val_t num_round(val_t v) {
+    if (vis_symbolic(v)) return sx_round(v);
     if (vis_complex(v)) scm_raise(V_FALSE, "no ordering on complex numbers");
     if (vis_surreal(v)) return sur_step(v, num_round);
     if (vis_mpfr(v))  return mpfr_num_round(v);

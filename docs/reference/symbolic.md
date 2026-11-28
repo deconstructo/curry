@@ -26,7 +26,8 @@ Curry's numeric tower includes a built-in computer algebra system (CAS). Any ope
 | `(quad-frac-diff f α x)` | Grünwald-Letnikov numerical D^α (for non-symbolic f) |
 | `(quad-frac-int f α x)` | Numerical RL fractional integral |
 | `(quad f a b)` | Gauss-Kronrod G7K15 adaptive numerical quadrature |
-| `(< a b)` / `(<= a b)` / `(> a b)` / `(>= a b)` | Symbolic-aware ordering comparisons (2-argument only — see "Symbolic inequalities" below) |
+| `(< a b)` / `(<= a b)` / `(> a b)` / `(>= a b)` | Ordering: decided (`#t`/`#f`) or an error for a symbolic operand (see "Symbolic values in comparisons" below) |
+| `(sym< a b)` / `(sym<= a b)` / `(sym> a b)` / `(sym>= a b)` | The comparison as an expression, when it cannot be decided |
 | `(sym->string expr)` / `(sym->infix expr)` | Infix string: `x^2 + 2*x + 1` |
 | `(sym->latex expr)` | LaTeX string: `x^{2} + 2 x + 1` |
 | `(sym->markdown expr)` / `(sym->markdown expr 'display)` | Markdown math: `$x^2$` inline, `` $$x^2$$ `` display |
@@ -456,18 +457,20 @@ Pattern variables bound in the pattern are available in the template and in `#:w
 
 `trigsimp` calls `simplify` internally, so it subsumes algebraic simplification. Use it when an expression involves trigonometric terms that `simplify` leaves unevaluated.
 
-## Symbolic inequalities
+## Symbolic values in comparisons, equality and rounding
 
-`<`, `<=`, `>`, `>=` lift over symbolic values the same way `+`/`*`/`sin`/etc. already do: applying them to a symbolic operand no longer raises "wrong type" — it either decides the comparison (returning `#t`/`#f`) or builds a symbolic comparison expression.
+A symbolic value is a number to the language: `(number? x)` is `#t`, and `real?`, `rational?` and `integer?` are `#t` only where an assumption on the variable says so (`'real`, `'positive`, `'negative`, `'integer`). The standard operators then have one defined behaviour for a symbolic operand (#437).
 
-This is motivated by a specific, common complaint about computer algebra systems: Fredrik Johansson's ["Things I would like to see in a computer algebra system"](https://fredrikj.net/blog/2022/04/things-i-would-like-to-see-in-a-computer-algebra-system/) (2022), point #12 — *"Analysis-oriented CASes are generally good at manipulating equalities and limits, but strangely poor at manipulating inequalities."*
+### Ordering: `<`, `<=`, `>`, `>=`
+
+Applied to a symbolic operand they **decide** the comparison, or **raise**. They never return a relation, because a relation is a symbolic object and so truthy: `(if (< x 1) 'a 'b)` would take the first branch whatever `x` is.
 
 ```scheme
 (symbolic x)
-(< x 5)              ; => (< x 5)   -- undecidable in general, stays symbolic
 (< 3 5)               ; => #t       -- ordinary numbers, unchanged
 (< x x)               ; => #f       -- reflexive: identical operands
-(<= x x)               ; => #t
+(<= x x)              ; => #t
+(< x 5)               ; raises: cannot decide a comparison with a symbolic value
 
 (define xp (sym-var 'x 'positive))
 (> xp 0)               ; => #t   -- decided from the 'positive assumption
@@ -475,31 +478,55 @@ This is motivated by a specific, common complaint about computer algebra systems
 (> xp -5)              ; => #t   -- positive var vs. any non-positive number
 ```
 
-### What gets decided
+A comparison is decided in exactly three cases:
 
-A comparison is decided (returns `#t`/`#f`) in exactly three cases:
+1. **Both operands are plain numbers.**
+2. **The two operands are structurally identical expressions** — the reflexive case: `<`/`>` are `#f`, `<=`/`>=` are `#t`.
+3. **One operand is a sign-flagged `sym-var`** (`'positive` or `'negative`) **and the other is a plain number** — decided from the sign.
 
-1. **Both operands are plain numbers** — ordinary numeric comparison, no change from before this feature existed.
-2. **The two operands are structurally identical expressions** (checked the same way `simplify`'s own cancellation rules check it, e.g. `(+ x (- x)) => 0`) — the reflexive case: `<`/`>` are `#f`, `<=`/`>=` are `#t`.
-3. **One operand is a sign-flagged `sym-var`** (`'positive` or `'negative`, see "Assumption flags" above) **and the other is a plain number** — decided from the sign, e.g. a `'positive` variable is always greater than any non-positive number.
+Anything else raises. Three or more arguments with a symbolic operand also raise.
 
-Anything else — comparing two different plain variables, a variable with no sign assumption against a number, a compound expression like `(+ x 1)` against a number — stays a genuine symbolic expression, printable and substitutable like any other:
+To get the relation as an expression, use `sym<`, `sym<=`, `sym>`, `sym>=`. They decide in the same three cases and otherwise build a node that prints, substitutes and simplifies like any other expression:
 
 ```scheme
 (symbolic y)
-(< x y)                        ; => (< x y)               -- two different variables
-(substitute (< x y) x 3)      ; => (< 3 y)                -- still undecidable
-(substitute (< x y) y 2)      ; => (< x 2)
-(simplify (< (+ x 1) 5))      ; => (< (+ 1 x) 5)
+(sym< x y)                      ; => x < y
+(substitute (sym< x y) x 3)    ; => 3 < y     -- still undecidable
+(substitute (sym< x y) y 2)    ; => x < 2
+(substitute (sym< x y) y 9)    ; => x < 9
+(substitute (sym< 1 x) x 5)    ; => #t        -- decided once both sides are numbers
 ```
 
-### What's explicitly out of scope
+Out of scope: no general sign inference (`(> (+ (expt x 2) 1) 0)` raises although it is always true), and no bound assumptions beyond sign. `∂`/`∫` of a relation stays unevaluated.
 
-- **No general expression-level sign inference.** `(> (+ (expt x 2) 1) 0)` stays symbolic even though it's always true — deciding that requires interval arithmetic / sign analysis over arbitrary expressions, a substantially larger feature than this one.
-- **No bound assumptions beyond sign.** There's no way to assume `x > 5`; the assumption system (`'positive`/`'negative`/`'real`/`'integer`/`'nonzero`/`'quaternion`) only ever carries a sign, not an arbitrary bound.
-- **3-or-more-argument symbolic comparisons are not supported.** `(< 1 x 5)` with `x` symbolic raises a clear error rather than silently misbehaving; `(< 1 3 5)` (no symbolic operand) works exactly as before. Modeling a symbolic chain like `1 < x < 5` would mean deciding what it even prints as (an `and` of two comparisons? a new ternary node?) — a real design question left for if it's ever actually needed.
-- **`=`/`≠` are not covered.** They hit the exact same underlying gap (`(= x x)` also used to raise), but symbolic equality's "when can I safely say `#f`" question is a different judgment call from ordering (two different symbols *might* be equal at runtime; only exact structural identity should ever fold to `#t`) — left for a future pass rather than bundled in here.
-- `∂`/`∫`/`differentiate` on a comparison expression is not meaningful and stays unevaluated (returned as-is, e.g. `(∂ (< x 5) x)` => `(∂ (< x 5) x)`), the same as any other operator the differentiator/integrator doesn't have a rule for.
+### Equality: `=`
+
+`=` on a symbolic value is **structural**: `(= x x)` is `#t`, `(= x 1)` and `(= x (+ x 1))` are `#f`, `(= (+ x 1) (+ 1 x))` is `#t` (the same expression after simplification). It does not ask whether the two could be equal for some value of `x`; for that, solve `(- a b)` for zero.
+
+### `max`, `min`, `floor`, `ceiling`, `round`, `truncate`
+
+On a symbolic value they return an unevaluated expression that evaluates once the value is known:
+
+```scheme
+(max x 1)                         ; => max(x, 1)
+(substitute (max x 1) x 5)        ; => 5
+(floor (+ x 1/2))                 ; => floor(1/2 + x)
+(substitute (floor (+ x 1/2)) x 2) ; => 2
+(floor n)                         ; => n    when n has the 'integer assumption
+(∂ (floor x) x)                   ; => 0
+```
+
+### `exact->inexact`, `inexact->exact`
+
+They convert every number inside the expression: `(exact->inexact (+ x 1))` is `1.0 + x`.
+
+### Arithmetic with a non-number
+
+`(+ x "a")` and the like raise `not a number`. They used to build an expression with a string in it.
+
+### Code that asks `(number? e)` to mean "already evaluated"
+
+`number?` is now `#t` for a symbolic value, so such a test no longer says whether anything is left to substitute. Use `(symbolic? e)` for that: `(if (symbolic? e) (substitute e v x) e)`.
 
 ## Symbolic differentiation
 
