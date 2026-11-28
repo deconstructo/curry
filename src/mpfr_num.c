@@ -367,7 +367,15 @@ val_t mpfr_to_exact(val_t v) {
 val_t mpfr_to_string(val_t v, int digits, int base) {
     if (!vis_mpfr(v)) scm_raise(V_FALSE, "mpfr->string: not an mpfr");
     if (base < 2 || base > 62) base = 10;
-    /* digits=0 → enough digits for round-trip (mpfr_get_str with n=0). */
+    /* digits=0 → the digits the precision supports: floor(prec * log_base(2)),
+     * at least 2. The last digit MPFR needs to identify the value uniquely
+     * (mpfr_get_str with n=0) is rounding noise to a reader, and a printed
+     * MPFR value does not read back as one anyway (#441). */
+    if (digits <= 0) {
+        double bits_per_digit = log2((double)base);
+        digits = (int)floor((double)mpfr_get_prec(as_mpfr(v)->x) / bits_per_digit);
+        if (digits < 2) digits = 2;   /* mpfr_get_str requires n >= 2 */
+    }
     mpfr_exp_t exp;
     char *raw = mpfr_get_str(NULL, &exp, base, (size_t)digits, as_mpfr(v)->x, tl_mpfr_rnd);
     if (!raw) scm_raise(V_FALSE, "mpfr->string: conversion failed");
@@ -408,7 +416,7 @@ val_t mpfr_to_string(val_t v, int digits, int base) {
         pos += rlen - 1;
     }
     /* Decimal-scientific exponent is (exp - 1) because we shifted the point. */
-    long e = (long)exp - 1;
+    long e = mpfr_zero_p(as_mpfr(v)->x) ? 0 : (long)exp - 1;   /* get_str gives exp 0 for zero */
     pos += (size_t)snprintf(out + pos, outcap - pos, "e%ld", e);
     mpfr_free_str(raw);
 

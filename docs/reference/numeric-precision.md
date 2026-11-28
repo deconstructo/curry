@@ -39,6 +39,15 @@ of a body with `with-precision`:
 
 When the context is inactive the default precision is 128 bits.
 
+An MPFR value prints with the digits its precision supports, `floor(prec × log₁₀ 2)`:
+38 digits at 128 bits, 15 at 53, 77 at 256. A printed MPFR value reads back as a
+flonum, so `write` does not recover the precision.
+
+`eqv?` and `equal?` on two MPFR values are `#t` when they have the same precision
+and the same value (a NaN is `eqv?` to a NaN; `+0` and `-0` differ), so they work as
+hash-table keys and in `member`/`assoc`. `max` and `min` with an MPFR argument and an
+exact one return an MPFR value, as R7RS requires for any inexact argument.
+
 Equivalent low-level entry point:
 
 ```scheme

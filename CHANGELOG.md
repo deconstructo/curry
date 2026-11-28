@@ -2,6 +2,26 @@
 
 ### Unreleased
 
+**Fixed — quaternion, complex and octonion operands; MPFR `eqv?`, `max` and printing (#436, #439, #441)**
+
+- `(real-part q)` of a quaternion returns its scalar part, not the whole
+  quaternion; `(imag-part q)` returns the vector part. Octonions likewise.
+- A quaternion mixed with a complex number now treats the complex `x+yi` as the
+  quaternion `x+yi`, in `+`, `-`, `*` and `/`: `(+ 1+2i+3j+4k 2+i)` is
+  `3+3i+3j+4k`, where it printed `3+2i+3j+4k+1i`, and `*` and `/` ignored the
+  imaginary part. `+`, `-` and `*` of a quaternion (or a complex number) with an
+  octonion give an octonion instead of raising `not a number`.
+- `equal?` and `eqv?` on octonions compare their eight parts (they compared
+  pointers), and hash tables keyed on octonions work.
+- `eqv?` and `equal?` on MPFR values are `#t` for the same precision and value
+  (they compared pointers), so `member`, `assoc` and hash tables work on them.
+- `max` and `min` return an inexact result when any argument is inexact:
+  `(max 3 2.0)` is `3.0`, and `(max (mpfr 1/3) 1/2)` is an MPFR value. Both
+  returned the exact argument.
+- An MPFR value prints with the digits its precision supports (38 at the
+  default 128 bits) instead of two more that were rounding noise, and zero
+  prints with the exponent `e0`.
+
 **Fixed — invoking a continuation after its `call/cc` returned (#443)**
 
 - A continuation invoked after its `call/cc` had returned (normally, by a

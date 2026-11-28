@@ -697,7 +697,16 @@ Quaternion literals use the same `a+bi+cj+dk` notation as output. Any subset of 
 (abs  q)          ; Euclidean norm ‖q‖ = √(w²+x²+y²+z²)
 (eqv? q1 q2)      ; #t iff all four components are equal (value comparison)
 (equal? q1 q2)    ; same
+(real-part q)     ; the scalar part, a flonum: (real-part 1+2i+3j+4k) => 1.0
+(imag-part q)     ; the vector part, a quaternion with a zero real part: 0+2i+3j+4k
 ```
+
+A complex number `x+yi` mixes with a quaternion as the quaternion `x+yi+0j+0k`,
+because `i` is the quaternion's own `i`: `(+ 1+2i+3j+4k 2+i)` is `3+3i+3j+4k`.
+A quaternion, a complex number or a real mixed with an octonion gives an octonion
+(`+`, `-`, `*`). Quaternion and octonion division by an octonion is not defined.
+`real-part` and `imag-part` of an octonion work the same way as for a quaternion;
+`equal?` compares all eight parts.
 
 ### Octonions
 
