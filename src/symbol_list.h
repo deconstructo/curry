@@ -60,6 +60,7 @@ SYM(S_WITH_EXCEPTION_HANDLER, "with-exception-handler")
 /* Only produced by compile_guard's own expansion (compiler_classic.c). */
 SYM(S_GUARD_WEH,          "%guard-with-exception-handler")
 SYM(S_GUARD_RERAISE,      "%guard-reraise")
+SYM(S_GUARD_EQ,           "%guard-eq")
 SYM(S_GUARD_CALL_CC,      "%guard-call/cc")
 
 /* Module system */

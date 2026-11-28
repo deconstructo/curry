@@ -1780,10 +1780,10 @@ static void compile_guard(Compiler *c, val_t args, bool tail, int line) {
      *     (let ((%v (%guard-call/cc (lambda (%guard-k)
      *                 (%guard-with-exception-handler
      *                   (lambda (var . %guard-unwound)
-     *                     (cond (test0 (set! %exn var) (set! %sel 0) (%guard-k #f)) ...
+     *                     (cond (test0 (set! %exn var) (set! %sel 0) (%guard-k '%guard-tok)) ...
      *                           (else (%guard-reraise var %guard-unwound))))
      *                   (lambda () body...))))))
-     *       (if %sel
+     *       (if (%guard-eq %v '%guard-tok)
      *           (let ((var %exn))
      *             (case %sel ((0) expr0 ...) ((1) (receiver1 %tv)) ...))
      *           %v)))
@@ -1793,6 +1793,9 @@ static void compile_guard(Compiler *c, val_t args, bool tail, int line) {
      * in between run first, as R7RS 6.11 has it (#431). A body that raised or an
      * after thunk that raises during the escape reaches this same handler again
      * and picks again; the last pick is the one that runs, once.
+     * The pick is looked at only when the escape came through the handler, which
+     * the token says: an after thunk can jump to a continuation inside the body
+     * after a pick, and the body then returns normally with the pick left behind.
      *
      * With no matching clause the exception is raised again, and R7RS 4.2.7
      * says with raise-continuable: an outer handler may return a value to
@@ -1835,6 +1838,8 @@ static void compile_guard(Compiler *c, val_t args, bool tail, int line) {
     val_t g_tv    = sym_intern_cstr(nm);
     snprintf(nm, sizeof nm, "%%guard-v.%u", serial);
     val_t g_val   = sym_intern_cstr(nm);
+    snprintf(nm, sizeof nm, "%%guard-tok.%u", serial);
+    val_t g_tok   = sym_intern_cstr(nm);
 
     /* Validates every clause is itself a non-empty pair before either
      * loop below destructures it -- see ir_lower_let's identical comment
@@ -1868,11 +1873,11 @@ static void compile_guard(Compiler *c, val_t args, bool tail, int line) {
         val_t test   = vcar(clause);
         val_t cbody  = vcdr(clause);
         val_t rest;
-        /* (set! %exn var) (set! %sel i) (%guard-k #f): pick clause i, escape. */
+        /* (set! %exn var) (set! %sel i) (%guard-k 'tok): pick clause i, escape. */
         #define PICK(i_) \
             scm_cons(scm_cons(S_SET, scm_cons(g_exn, scm_cons(var, V_NIL))), \
               scm_cons(scm_cons(S_SET, scm_cons(g_sel, scm_cons(vfix(i_), V_NIL))), \
-                scm_cons(scm_cons(gk, scm_cons(V_FALSE, V_NIL)), V_NIL)))
+                scm_cons(scm_cons(gk, scm_cons(scm_cons(S_QUOTE, scm_cons(g_tok, V_NIL)), V_NIL)), V_NIL)))
         if (!vis_pair(cbody)) {
             /* Bodyless clause (test) — return test's own value without
              * re-evaluating it, via cond's => arrow form (proc receives
@@ -1944,8 +1949,10 @@ static void compile_guard(Compiler *c, val_t args, bool tail, int line) {
     val_t bind_var = scm_cons(S_LET,
                          scm_cons(scm_cons(scm_cons(var, scm_cons(g_exn, V_NIL)), V_NIL),
                              scm_cons(case_form, V_NIL)));
-    /* (if %sel bind-var %v) */
-    val_t finish = scm_cons(S_IF, scm_cons(g_sel, scm_cons(bind_var, scm_cons(g_val, V_NIL))));
+    /* (if (%guard-eq %v 'tok) bind-var %v) */
+    val_t is_pick = scm_cons(S_GUARD_EQ,
+                        scm_cons(g_val, scm_cons(scm_cons(S_QUOTE, scm_cons(g_tok, V_NIL)), V_NIL)));
+    val_t finish = scm_cons(S_IF, scm_cons(is_pick, scm_cons(bind_var, scm_cons(g_val, V_NIL))));
     /* (let ((%v callcc)) finish) */
     val_t inner = scm_cons(S_LET,
                       scm_cons(scm_cons(scm_cons(g_val, scm_cons(callcc, V_NIL)), V_NIL),
@@ -2564,6 +2571,7 @@ SpecialForm classify_head(Compiler *c, val_t head, val_t args,
     if (head == S_WITH_EXCEPTION_HANDLER) return SF_WITH_EXCEPTION_HANDLER;
     if (head == S_GUARD_WEH) return SF_GUARD_WEH;
     if (head == S_GUARD_RERAISE) return SF_GUARD_RERAISE;
+    if (head == S_GUARD_EQ) return SF_GUARD_EQ;
     if (head == S_GUARD_CALL_CC) return SF_GUARD_CALL_CC;
     if (head == S_RECEIVE && vis_pair(args) && vis_pair(vcdr(args)))
         return SF_RECEIVE;
@@ -2857,6 +2865,19 @@ void compile(Compiler *c, val_t expr, bool tail, int line) {
         compile(c, vcar(args), false, line);
         emit(c, OP_CALL_CC, line);
         return;
+
+    /* (%guard-eq a b): eqv? as an opcode, not a call of the variable eqv?, so a
+     * library that imports neither eqv? nor eq? can use guard. See compile_guard. */
+    case SF_GUARD_EQ: {
+        require_min_args(args, 2, "guard");
+        int saved = c->local_count;
+        compile(c, vcar(args), false, line);
+        reserve_pending_slot(c);
+        compile(c, vcar(vcdr(args)), false, line);
+        release_pending_slots(c, saved);
+        emit(c, OP_EQV, line);
+        return;
+    }
 
     /* (%guard-reraise exn unwound): see compile_guard. */
     case SF_GUARD_RERAISE: {

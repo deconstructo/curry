@@ -356,6 +356,40 @@
 (check "the value is not mistaken for a clause pick"
        (guard (e (#t 'caught)) #f) #f)
 
+;; A pick left behind by an escape that was cut short is not run: an after
+;; thunk jumps to a continuation inside the guard body, and the body returns
+;; normally (R7RS: the value of the body).
+(check "compiled: the guard's continuation is not reached, the body's value is the guard's"
+       (guard (e (#t 'clause))
+         (call/cc (lambda (k)
+           (dynamic-wind (lambda () #f)
+                         (lambda () (raise-continuable 'x))
+                         (lambda () (k 'escaped))))))
+       'escaped)
+(check "tree-walked: the same"
+       (tree-eval '(guard (e (#t 'clause))
+                     (call/cc (lambda (k)
+                       (dynamic-wind (lambda () #f)
+                                     (lambda () (raise-continuable 'x))
+                                     (lambda () (k 'escaped)))))))
+       'escaped)
+(check "compiled: a later raise picks a bodyless clause after an abandoned pick"
+       (guard (e ((memq e '(a b))) ((symbol? e) (list 'first e)))
+         (call/cc (lambda (k)
+           (dynamic-wind (lambda () #f)
+                         (lambda () (raise-continuable 'x))
+                         (lambda () (k 'back)))))
+         (raise-continuable 'b))
+       '(b))
+(check "compiled: after the abandoned pick the body can finish with its own value"
+       (guard (e (#t 'clause))
+         (call/cc (lambda (k)
+           (dynamic-wind (lambda () #f)
+                         (lambda () (raise-continuable 'x))
+                         (lambda () (k 'back)))))
+         'finished)
+       'finished)
+
 ;;; An exception from a clause goes outward, not back into the same guard.
 (check "a clause test that raises (in place)"
        (guard (o (#t (list 'outer o))) (guard (e ((raise 'from-test) 1)) (raise-continuable 'x)))
