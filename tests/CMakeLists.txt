@@ -267,6 +267,9 @@ if(BUILD_MODULE_SYNC AND TARGET curry_sync)
     add_test(NAME sync COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/sync_tests.scm)
     set_tests_properties(sync PROPERTIES
         ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
+    add_test(NAME sync_rwlock_once_barrier COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/sync_rwlock_once_barrier_tests.scm)
+    set_tests_properties(sync_rwlock_once_barrier PROPERTIES TIMEOUT 120
+        ENVIRONMENT "CURRY_MODULE_PATH=${MOD_PATH}")
 endif()
 
 if(BUILD_MODULE_STORAGE AND TARGET curry_storage)

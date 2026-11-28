@@ -2,7 +2,7 @@
 
 *v1.2.2 — 2026-06-07*
 
-Low-level synchronisation primitives: mutex, condition variable, and counting semaphore, built directly over POSIX pthreads. No external library required.
+Low-level synchronisation primitives: mutex, condition variable, counting semaphore, read-write lock, once and barrier, built directly over POSIX pthreads. No external library required.
 
 > **macOS note.** macOS does not implement unnamed POSIX semaphores (`sem_init` always fails). The semaphore type in this module is therefore implemented with a `pthread_mutex_t` + `pthread_cond_t` + counter — identical semantics to `sem_t`, but portable across Linux and macOS.
 
@@ -142,8 +142,81 @@ Return the current count of the semaphore.
 
 Returns `#t` if `x` is a semaphore handle.
 
+## Read-write lock
+
+Any number of readers, or one writer. It is not recursive: a thread that takes a lock it already holds for writing gets an error on macOS and with glibc, and may deadlock elsewhere. Unlocking a lock the thread does not hold is undefined.
+
+### `(make-rwlock)` → *rwlock*, `(rwlock-destroy! rw)`
+
+Create a read-write lock; destroy it and free its memory.
+
+### `(rwlock-read-lock! rw)`, `(rwlock-write-lock! rw)`
+
+Take the lock for reading, or for writing, blocking until it is available.
+
+### `(rwlock-try-read-lock! rw)`, `(rwlock-try-write-lock! rw)` → *boolean*
+
+Try without blocking. `#t` if the lock was taken, `#f` if it was not available (including when this thread holds it for writing).
+
+### `(rwlock-unlock! rw)`
+
+Release a read or a write lock held by this thread.
+
+### `(with-read-lock rw thunk)`, `(with-write-lock rw thunk)`
+
+Take the lock, call `thunk`, release it, and return the thunk's value. The lock is released on a normal return, when the thunk raises (the exception is raised again afterwards) and when a continuation escapes from it.
+
+```scheme
+(define rw (make-rwlock))
+(define table (make-hash-table equal?))
+(define (lookup k)   (with-read-lock  rw (lambda () (hash-table-ref table k #f))))
+(define (store! k v) (with-write-lock rw (lambda () (hash-table-set! table k v))))
+```
+
+### `(rwlock? x)` → *boolean*
+
+## Once
+
+Run an initialisation exactly once, from any number of threads.
+
+### `(make-once)` → *once*, `(once-destroy! o)`
+
+### `(once! o thunk)` → *boolean*
+
+If `o` has not been used up, call `thunk` and return `#t`. Other threads that call `once!` meanwhile wait until `thunk` has finished and then return `#f`, as does every later call. If `thunk` raises, or a continuation escapes from it, `o` is **not** used up: the exception propagates to this caller, and the next caller (a waiting one first) runs its own thunk. Calling `once!` on `o` from inside its own thunk raises an error instead of deadlocking.
+
+```scheme
+(define config-once (make-once))
+(define config #f)
+(define (get-config)
+  (once! config-once (lambda () (set! config (load-config))))
+  config)
+```
+
+### `(once-done? o)` → *boolean*, `(once? x)` → *boolean*
+
+## Barrier
+
+### `(make-barrier n)` → *barrier*, `(barrier-destroy! b)`
+
+A barrier for `n` threads, `n` from 1 to 1048576.
+
+### `(barrier-wait! b)` → *boolean*
+
+Block until `n` threads have called `barrier-wait!`, then release all of them. The barrier can be used again. One of the `n` threads gets `#t` (it may do work that must be done once per round), the others `#f`. Built on a mutex and a condition variable, because macOS has no `pthread_barrier_t`.
+
+```scheme
+(define bar (make-barrier 4))
+;; in each of 4 threads:
+(compute-my-part)
+(barrier-wait! bar)        ; nobody continues until all four have finished
+(use-everybody's-parts)
+```
+
+### `(barrier-parties b)` → *fixnum*, `(barrier? x)` → *boolean*
+
 ## Resource management
 
 Handles are plain pair/bytevector values with no GC finalizer. The underlying pthread resource is heap-allocated with `malloc`. Call the corresponding `*-destroy!` procedure before releasing a handle to avoid resource leaks.
 
-`with-mutex` is exception-safe: the mutex is always unlocked, even if the thunk raises. For condition variable and semaphore usage in potentially-raising code, wrap cleanup in `dynamic-wind` or `guard` manually.
+`with-mutex`, `with-read-lock` and `with-write-lock` are exception-safe: the lock is always released, even if the thunk raises or a continuation escapes from it. For condition variable and semaphore usage in potentially-raising code, wrap cleanup in `dynamic-wind` or `guard` manually.
