@@ -2,6 +2,8 @@
 
 ### Unreleased
 
+**Fixed: shared hash tables, sets and string ports (#452, #453).** `map` runs on the work pool above 8 elements, so a lambda that wrote one hash table ran on several threads: a rehash under a probing thread made the program never finish (20000 elements, 3 of 3 runs). A string port written from several threads lost output and could crash, because its capacity grew before its buffer. Each table and each string port now has a lock held for one operation. An update that reads and then writes (`ref` then `set!`) is still two operations: use a mutex from `(curry sync)`. Not fixed here: the Bernoulli and Euler caches (#454).
+
 **New — futures: `(curry future)`**
 
 - `(pool-submit thunk)` runs a thunk on a worker of the pool that `map` and

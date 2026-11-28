@@ -22,6 +22,7 @@
 
 #include "eval.h"
 #include "runtime_internal.h"
+#include "spinlock.h"
 #include "vm.h"
 #include "bcjit_rt.h"
 #include "compiler.h"
@@ -650,6 +651,7 @@ void check_c_stack_depth(const char *context) {
     size_t used = (size_t)((uintptr_t)c_stack_base - (uintptr_t)&stack_probe);
     if (__builtin_expect(used > c_stack_limit, 0)) {
         vm_note_overflow();
+        spin_release_held();    /* raised from inside a table or port section (#452) */
         scm_raise_code(EC_STACK_OVERFLOW, "%s: call stack overflow", context);
     }
 }

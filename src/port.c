@@ -1,4 +1,5 @@
 #include "port.h"
+#include "spinlock.h"
 #include "object.h"
 #include "gc.h"
 #include "numeric.h"
@@ -37,6 +38,7 @@ static val_t make_port(int flags) {
     p->flags     = (uint8_t)flags;
     p->peeked_cp = -2;   /* -2 = lookahead empty; -1 = EOF; ≥0 = codepoint */
     p->line      = 1;
+    p->lock      = 0;
     return vptr(p);
 }
 
@@ -271,6 +273,25 @@ bool port_char_ready(val_t v) {
     return false;
 }
 
+/* Append to a string output port. Several threads may write one port (a
+ * parallel map, actors): the buffer grows, and its capacity and pointer change
+ * together, so the whole append is one critical section (#453). */
+static void str_append(Port *p, const void *data, size_t len) {
+    spin_lock(&p->lock);
+    if (p->u.str.len + len + 1 >= p->u.str.cap) {
+        size_t cap = p->u.str.cap < 16 ? 16 : p->u.str.cap;
+        while (p->u.str.len + len + 1 >= cap) cap *= 2;
+        char *nb = (char *)gc_alloc_raw_pinned_atomic(cap);
+        memcpy(nb, p->u.str.buf, p->u.str.len);
+        p->u.str.buf = nb;
+        p->u.str.cap = cap;
+    }
+    memcpy(p->u.str.buf + p->u.str.len, data, len);
+    p->u.str.len += len;
+    p->u.str.buf[p->u.str.len] = '\0';
+    spin_unlock(&p->lock);
+}
+
 void port_write_char(val_t v, int cp) {
     Port *p = checked_port(v, "write-char");
     if (p->flags & PORT_CLOSED) return;
@@ -283,15 +304,7 @@ void port_write_char(val_t v, int cp) {
     else { buf[0]=(char)(0xF0|(u>>18)); buf[1]=(char)(0x80|((u>>12)&0x3F)); buf[2]=(char)(0x80|((u>>6)&0x3F)); buf[3]=(char)(0x80|(u&0x3F)); len=4; }
     buf[len] = '\0';
     if (p->flags & PORT_STRING) {
-        while (p->u.str.len + (size_t)len + 1 >= p->u.str.cap) {
-            p->u.str.cap *= 2;
-            char *nb = (char *)gc_alloc_raw_pinned_atomic(p->u.str.cap);
-            memcpy(nb, p->u.str.buf, p->u.str.len);
-            p->u.str.buf = nb;
-        }
-        memcpy(p->u.str.buf + p->u.str.len, buf, (size_t)len);
-        p->u.str.len += (size_t)len;
-        p->u.str.buf[p->u.str.len] = '\0';
+        str_append(p, buf, (size_t)len);
     } else {
         fwrite(buf, 1, (size_t)len, p->u.fp);
     }
@@ -301,15 +314,7 @@ void port_write_string(val_t v, const char *s, uint32_t len) {
     Port *p = checked_port(v, "write-string");
     if (p->flags & PORT_CLOSED) return;
     if (p->flags & PORT_STRING) {
-        while (p->u.str.len + len + 1 >= p->u.str.cap) {
-            p->u.str.cap *= 2;
-            char *nb = (char *)gc_alloc_raw_pinned_atomic(p->u.str.cap);
-            memcpy(nb, p->u.str.buf, p->u.str.len);
-            p->u.str.buf = nb;
-        }
-        memcpy(p->u.str.buf + p->u.str.len, s, len);
-        p->u.str.len += len;
-        p->u.str.buf[p->u.str.len] = '\0';
+        str_append(p, s, len);
     } else {
         fwrite(s, 1, len, p->u.fp);
     }
@@ -379,14 +384,7 @@ void port_write_byte(val_t v, uint8_t b) {
     if (p->flags & PORT_STRING) {
         /* Binary string port: append raw byte without UTF-8 encoding. */
         if (p->flags & PORT_BINARY) {
-            while (p->u.str.len + 2 >= p->u.str.cap) {
-                p->u.str.cap = p->u.str.cap < 16 ? 16 : p->u.str.cap * 2;
-                char *nb = (char *)gc_alloc_raw_pinned_atomic(p->u.str.cap);
-                memcpy(nb, p->u.str.buf, p->u.str.len);
-                p->u.str.buf = nb;
-            }
-            p->u.str.buf[p->u.str.len++] = (char)b;
-            p->u.str.buf[p->u.str.len]   = '\0';
+            str_append(p, &b, 1);
         } else {
             port_write_char(v, b);
         }
@@ -433,29 +431,53 @@ val_t port_get_output_string(val_t v) {
     Port *p = checked_port(v, "get-output-string");
     if (!(p->flags & PORT_STRING))
         scm_raise(V_FALSE, "get-output-string: not a string port");
-    uint32_t len = (uint32_t)p->u.str.len;
-    String *s = (String *)gc_alloc_atomic(sizeof(String) + len + 1);
-    s->hdr.type  = T_STRING;
-    s->hdr.flags = 0;
-    s->len  = len;
-    s->hash = 0;
-    s->orig_cap = len;
-    s->ext = NULL;
-    memcpy(s->data, p->u.str.buf, len + 1);
-    return vptr(s);
+    /* Allocate outside the lock for the length seen, then copy under it what
+     * the port holds. Only if it has grown past the allocation go round again
+     * (a reader that waited for an unchanged length could starve while others
+     * keep writing). */
+    String *s = NULL;
+    uint32_t cap = 0;
+    for (;;) {
+        spin_lock(&p->lock);
+        uint32_t now = (uint32_t)p->u.str.len;
+        if (s && now <= cap) {
+            memcpy(s->data, p->u.str.buf, now + 1);
+            spin_unlock(&p->lock);
+            s->len = now;
+            s->orig_cap = now;
+            return vptr(s);
+        }
+        spin_unlock(&p->lock);
+        cap = now + now / 4 + 16;
+        s = (String *)gc_alloc_atomic(sizeof(String) + cap + 1);
+        s->hdr.type  = T_STRING;
+        s->hdr.flags = 0;
+        s->hash = 0;
+        s->ext = NULL;
+    }
 }
 
 val_t port_get_output_bytevector(val_t v) {
     Port *p = checked_port(v, "get-output-bytevector");
     if (!(p->flags & PORT_STRING) || !(p->flags & PORT_BINARY))
         scm_raise(V_FALSE, "get-output-bytevector: not a binary output port");
-    uint32_t len = (uint32_t)p->u.str.len;
-    Bytevector *bv = (Bytevector *)gc_alloc_atomic(sizeof(Bytevector) + len);
-    bv->hdr.type  = T_BYTEVECTOR;
-    bv->hdr.flags = 0;
-    bv->len = len;
-    memcpy(bv->data, p->u.str.buf, len);
-    return vptr(bv);
+    Bytevector *bv = NULL;
+    uint32_t cap = 0;
+    for (;;) {
+        spin_lock(&p->lock);
+        uint32_t now = (uint32_t)p->u.str.len;
+        if (bv && now <= cap) {
+            memcpy(bv->data, p->u.str.buf, now);
+            spin_unlock(&p->lock);
+            bv->len = now;
+            return vptr(bv);
+        }
+        spin_unlock(&p->lock);
+        cap = now + now / 4 + 16;
+        bv = (Bytevector *)gc_alloc_atomic(sizeof(Bytevector) + cap);
+        bv->hdr.type  = T_BYTEVECTOR;
+        bv->hdr.flags = 0;
+    }
 }
 
 /* ---- Display / Write ---- */

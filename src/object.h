@@ -378,6 +378,7 @@ typedef struct {
     int     peeked_cp;   /* one-codepoint lookahead buffer; -2 = empty */
     int     line;        /* 1-based line of the next unread character;
                              tracked for reader backtraces (see reader.c) */
+    uint32_t lock;       /* string ports: guards u.str.buf/len/cap (spinlock.h) */
     union {
         FILE *fp;
         struct {
@@ -538,6 +539,7 @@ typedef struct {
     uint32_t cap;
     val_t   *buckets;  /* V_UNDEF = empty, V_EOF = tombstone */
     int      cmp;
+    uint32_t lock;     /* 0 = free, else the holder's token; see set.c */
 } Set;
 
 /* Hash table (same open-addressing scheme) */
@@ -549,6 +551,7 @@ typedef struct {
     val_t   *keys;
     val_t   *vals;
     int      cmp;
+    uint32_t lock;     /* 0 = free, else the holder's token; see set.c */
 } Hashtable;
 
 /* Record type descriptor (RTD)

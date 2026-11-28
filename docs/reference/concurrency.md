@@ -339,6 +339,18 @@ needed.
 
 ---
 
+## Shared hash tables, sets and string ports
+
+`map` and `reduce` run on the work pool above 8 elements, so a lambda you pass may run on several threads at once. Hash tables, sets and string output ports are safe to share: each has a lock held for one operation, so a parallel `map` that calls `hash-table-set!` on one table, or writes to one string port, loses nothing and cannot corrupt it. The lock costs about 25 ns per write.
+
+An update that reads and then writes is two operations, and another thread can run between them:
+
+```scheme
+(hash-table-set! h k (+ 1 (hash-table-ref h k (lambda () 0))))   ; two threads can both read 0
+```
+
+Wrap such an update in a mutex from `(curry sync)`, or keep one writer. Plain variables are not protected: a `set!` on a global from a parallel `map` loses updates, and a `set!` on a captured local inside an actor is not seen by the code that spawned it (#448). The Bernoulli and Euler number caches are not yet locked (#454).
+
 ## Shared global state and actors
 
 A few pieces of process-wide state are reachable from any actor concurrently

@@ -9,6 +9,26 @@
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
+#include "spinlock.h"
+
+/* ---- Locking (#452) ----
+ * A set or hash table is shared by every thread that can reach it: actors,
+ * futures, and the parallel map/for-each/par (which runs a lambda on the pool
+ * without the caller asking). A rehash replaces the arrays while another
+ * thread probes them, which looped for ever or read past the end. Each table
+ * therefore has a lock word, held for one operation at a time (never across a
+ * call into Scheme, and never across more than one table). A compound update
+ * ("read, then set") is still two operations: use a mutex from (curry sync).
+ *
+ * The hash of the key is taken before the lock where that is possible. What
+ * can still raise inside a section (stack-overflow while rehashing a deep stored
+ * key, or comparing one) releases the lock first; see spinlock.h. */
+#define table_lock   spin_lock
+#define table_unlock spin_unlock
+
+uint32_t spin_next_token = 1;
+CURRY_THREAD_LOCAL uint32_t spin_my_token = 0;
+CURRY_THREAD_LOCAL uint32_t *spin_held = NULL;
 
 /* Every set_* entry point below used to cast a caller-supplied val_t
  * straight to a Set* via as_set() with no type check -- the exact same
@@ -277,15 +297,15 @@ static void set_rehash(Set *s) {
 val_t set_make(int cmp_type) {
     Set *s = CURRY_NEW(Set);
     s->hdr.type=T_SET; s->hdr.flags=0;
-    s->size=0; s->used=0; s->cap=0; s->buckets=NULL; s->cmp=cmp_type;
+    s->size=0; s->used=0; s->cap=0; s->buckets=NULL; s->cmp=cmp_type; s->lock=0;
     set_rehash(s);
     return vptr(s);
 }
 
-bool set_member(val_t sv, val_t elem) {
-    Set *s = checked_set(sv, "set-member?");
+/* The probe loops below run with the table's lock held. */
+static bool set_find_locked(Set *s, val_t elem, uint32_t h) {
     uint32_t mask = s->cap - 1;
-    uint32_t idx  = val_hash(elem, s->cmp) & mask;
+    uint32_t idx  = h & mask;
     while (1) {
         val_t e = s->buckets[idx];
         if (e == EMPTY_SLOT) return false;
@@ -294,52 +314,62 @@ bool set_member(val_t sv, val_t elem) {
     }
 }
 
+bool set_member(val_t sv, val_t elem) {
+    Set *s = checked_set(sv, "set-member?");
+    uint32_t h = val_hash(elem, s->cmp);
+    table_lock(&s->lock);
+    bool found = set_find_locked(s, elem, h);
+    table_unlock(&s->lock);
+    return found;
+}
+
 void set_add_mut(val_t sv, val_t elem) {
     Set *s = checked_set(sv, "set-add!");
-    if (set_member(sv, elem)) return;
+    uint32_t h = val_hash(elem, s->cmp);
+    table_lock(&s->lock);
+    if (set_find_locked(s, elem, h)) { table_unlock(&s->lock); return; }
     if (s->used * LOAD_DEN >= s->cap * LOAD_NUM) set_rehash(s);
     uint32_t mask = s->cap - 1;
-    uint32_t idx  = val_hash(elem, s->cmp) & mask;
+    uint32_t idx  = h & mask;
     while (s->buckets[idx] != EMPTY_SLOT && s->buckets[idx] != DEAD_SLOT)
         idx = (idx + 1) & mask;
     if (s->buckets[idx] == EMPTY_SLOT) s->used++;
     s->buckets[idx] = elem;
     s->size++;
+    table_unlock(&s->lock);
 }
 
 void set_delete_mut(val_t sv, val_t elem) {
     Set *s = checked_set(sv, "set-delete!");
+    uint32_t h = val_hash(elem, s->cmp);
+    table_lock(&s->lock);
     uint32_t mask = s->cap - 1;
-    uint32_t idx  = val_hash(elem, s->cmp) & mask;
+    uint32_t idx  = h & mask;
     while (1) {
         val_t e = s->buckets[idx];
-        if (e == EMPTY_SLOT) return;
+        if (e == EMPTY_SLOT) break;
         if (e != DEAD_SLOT && slot_matches(e, elem, s->cmp)) {
             s->buckets[idx] = DEAD_SLOT;
             s->size--;
-            return;
+            break;
         }
         idx = (idx + 1) & mask;
     }
+    table_unlock(&s->lock);
 }
 
 val_t set_add(val_t sv, val_t elem) {
     /* Copy and add */
-    Set *old = checked_set(sv, "set-add");
-    val_t nv = set_make(old->cmp);
-    Set *s = as_set(nv);
-    for (uint32_t i = 0; i < old->cap; i++) {
-        val_t e = old->buckets[i];
-        if (e != EMPTY_SLOT && e != DEAD_SLOT) set_add_mut(nv, e);
-    }
+    val_t nv = set_make(checked_set(sv, "set-add")->cmp);
+    for (val_t l = set_to_list(sv); vis_pair(l); l = vcdr(l)) set_add_mut(nv, vcar(l));
     set_add_mut(nv, elem);
-    (void)s;
     return nv;
 }
 
 val_t set_to_list(val_t sv) {
     Set *s = checked_set(sv, "set->list");
     val_t lst = V_NIL;
+    table_lock(&s->lock);
     for (uint32_t i = 0; i < s->cap; i++) {
         val_t e = s->buckets[i];
         if (e == EMPTY_SLOT || e == DEAD_SLOT) continue;
@@ -347,6 +377,7 @@ val_t set_to_list(val_t sv) {
         p->hdr.type=T_PAIR; p->hdr.flags=0; p->car=e; p->cdr=lst;
         lst = vptr(p);
     }
+    table_unlock(&s->lock);
     return lst;
 }
 
@@ -356,7 +387,7 @@ val_t list_to_set(val_t lst, int cmp_type) {
     return s;
 }
 
-uint32_t set_size(val_t sv) { return checked_set(sv, "set-size")->size; }
+uint32_t set_size(val_t sv) { return __atomic_load_n(&checked_set(sv, "set-size")->size, __ATOMIC_RELAXED); }
 
 val_t set_union(val_t a, val_t b) {
     val_t r = set_make(checked_set(a, "set-union")->cmp);
@@ -396,7 +427,7 @@ bool set_subset(val_t a, val_t b) {
 }
 
 bool set_equal(val_t a, val_t b) {
-    return checked_set(a, "set=?")->size == checked_set(b, "set=?")->size && set_subset(a, b);
+    return set_size(a) == set_size(b) && set_subset(a, b);
 }
 
 val_t set_copy(val_t sv) {
@@ -428,16 +459,18 @@ static void hash_rehash(Hashtable *h) {
 val_t hash_make(int cmp_type) {
     Hashtable *h = CURRY_NEW(Hashtable);
     h->hdr.type=T_HASHTABLE; h->hdr.flags=0;
-    h->size=0; h->used=0; h->cap=0; h->keys=NULL; h->vals=NULL; h->cmp=cmp_type;
+    h->size=0; h->used=0; h->cap=0; h->keys=NULL; h->vals=NULL; h->cmp=cmp_type; h->lock=0;
     hash_rehash(h);
     return vptr(h);
 }
 
 void hash_set(val_t hv, val_t key, val_t val) {
     Hashtable *h = as_hash(hv);
+    uint32_t hc = val_hash(key, h->cmp);
+    table_lock(&h->lock);
     if (h->used * LOAD_DEN >= h->cap * LOAD_NUM) hash_rehash(h);
     uint32_t mask = h->cap - 1;
-    uint32_t idx  = val_hash(key, h->cmp) & mask;
+    uint32_t idx  = hc & mask;
     /* Walk the whole probe chain (to the first EMPTY slot) looking for the
      * key, remembering the first tombstone: the key may live past a
      * tombstone, and only if it is absent may the tombstone be reused. */
@@ -448,24 +481,32 @@ void hash_set(val_t hv, val_t key, val_t val) {
             if (!have_dead) { have_dead = true; dead_idx = idx; }
         } else if (slot_matches(h->keys[idx], key, h->cmp)) {
             h->vals[idx] = val;
+            table_unlock(&h->lock);
             return;
         }
         idx = (idx + 1) & mask;
     }
     if (have_dead) idx = dead_idx; else h->used++;
     h->keys[idx] = key; h->vals[idx] = val; h->size++;
+    table_unlock(&h->lock);
 }
 
 val_t hash_ref(val_t hv, val_t key, val_t def) {
     Hashtable *h = as_hash(hv);
+    uint32_t hc = val_hash(key, h->cmp);
+    table_lock(&h->lock);
     uint32_t mask = h->cap - 1;
-    uint32_t idx  = val_hash(key, h->cmp) & mask;
-    while (1) {
-        if (h->keys[idx] == EMPTY_SLOT) return def;
-        if (h->keys[idx] != DEAD_SLOT && slot_matches(h->keys[idx], key, h->cmp))
-            return h->vals[idx];
+    uint32_t idx  = hc & mask;
+    val_t r = def;
+    while (h->keys[idx] != EMPTY_SLOT) {
+        if (h->keys[idx] != DEAD_SLOT && slot_matches(h->keys[idx], key, h->cmp)) {
+            r = h->vals[idx];
+            break;
+        }
         idx = (idx + 1) & mask;
     }
+    table_unlock(&h->lock);
+    return r;
 }
 
 bool hash_has(val_t hv, val_t key) {
@@ -474,51 +515,46 @@ bool hash_has(val_t hv, val_t key) {
 
 void hash_delete(val_t hv, val_t key) {
     Hashtable *h = as_hash(hv);
+    uint32_t hc = val_hash(key, h->cmp);
+    table_lock(&h->lock);
     uint32_t mask = h->cap - 1;
-    uint32_t idx  = val_hash(key, h->cmp) & mask;
-    while (1) {
-        if (h->keys[idx] == EMPTY_SLOT) return;
+    uint32_t idx  = hc & mask;
+    while (h->keys[idx] != EMPTY_SLOT) {
         if (h->keys[idx] != DEAD_SLOT && slot_matches(h->keys[idx], key, h->cmp)) {
-            h->keys[idx] = DEAD_SLOT; h->size--; return;
+            h->keys[idx] = DEAD_SLOT; h->size--;
+            break;
         }
         idx = (idx + 1) & mask;
     }
+    table_unlock(&h->lock);
 }
 
-val_t hash_to_alist(val_t hv) {
+/* One pass over the live entries under the lock; what to put in the list is
+ * chosen by `what`: 0 = (key . value) pairs, 1 = keys, 2 = values. */
+static val_t hash_list(val_t hv, int what) {
     Hashtable *h = as_hash(hv);
     val_t lst = V_NIL;
+    table_lock(&h->lock);
     for (uint32_t i = 0; i < h->cap; i++) {
         if (h->keys[i]==EMPTY_SLOT || h->keys[i]==DEAD_SLOT) continue;
-        Pair *pair = CURRY_NEW(Pair); pair->hdr.type=T_PAIR; pair->hdr.flags=0;
-        pair->car=h->keys[i]; pair->cdr=h->vals[i];
+        val_t item;
+        if (what == 0) {
+            Pair *pair = CURRY_NEW(Pair); pair->hdr.type=T_PAIR; pair->hdr.flags=0;
+            pair->car=h->keys[i]; pair->cdr=h->vals[i];
+            item = vptr(pair);
+        } else {
+            item = what == 1 ? h->keys[i] : h->vals[i];
+        }
         Pair *cons = CURRY_NEW(Pair); cons->hdr.type=T_PAIR; cons->hdr.flags=0;
-        cons->car=vptr(pair); cons->cdr=lst;
+        cons->car=item; cons->cdr=lst;
         lst = vptr(cons);
     }
+    table_unlock(&h->lock);
     return lst;
 }
 
-val_t hash_keys(val_t hv) {
-    Hashtable *h = as_hash(hv);
-    val_t lst = V_NIL;
-    for (uint32_t i = 0; i < h->cap; i++) {
-        if (h->keys[i]==EMPTY_SLOT || h->keys[i]==DEAD_SLOT) continue;
-        Pair *p = CURRY_NEW(Pair); p->hdr.type=T_PAIR; p->hdr.flags=0;
-        p->car=h->keys[i]; p->cdr=lst; lst=vptr(p);
-    }
-    return lst;
-}
+val_t hash_to_alist(val_t hv) { return hash_list(hv, 0); }
+val_t hash_keys(val_t hv)     { return hash_list(hv, 1); }
+val_t hash_values(val_t hv)   { return hash_list(hv, 2); }
 
-val_t hash_values(val_t hv) {
-    Hashtable *h = as_hash(hv);
-    val_t lst = V_NIL;
-    for (uint32_t i = 0; i < h->cap; i++) {
-        if (h->keys[i]==EMPTY_SLOT || h->keys[i]==DEAD_SLOT) continue;
-        Pair *p = CURRY_NEW(Pair); p->hdr.type=T_PAIR; p->hdr.flags=0;
-        p->car=h->vals[i]; p->cdr=lst; lst=vptr(p);
-    }
-    return lst;
-}
-
-uint32_t hash_size(val_t hv) { return as_hash(hv)->size; }
+uint32_t hash_size(val_t hv) { return __atomic_load_n(&as_hash(hv)->size, __ATOMIC_RELAXED); }
