@@ -2343,7 +2343,7 @@ static val_t prim_call_with_input_file(int ac, val_t *av, void *ud) {
     WindFrame *wf = wind_push_cleanup(close_port_cleanup, &port);
     val_t result = V_VOID;
     ExnHandler h;
-    SCM_PROTECT(h, result = apply(av[1], scm_cons(port, V_NIL)),
+    SCM_PROTECT_CLEANUP(h, result = apply(av[1], scm_cons(port, V_NIL)),
                 { wind_pop_cleanup(wf); scm_raise_val(h.exn); });
     wind_pop_cleanup(wf);
     return result;
@@ -2358,7 +2358,7 @@ static val_t prim_call_with_output_file(int ac, val_t *av, void *ud) {
     WindFrame *wf = wind_push_cleanup(close_port_cleanup, &port);
     val_t result = V_VOID;
     ExnHandler h;
-    SCM_PROTECT(h, result = apply(av[1], scm_cons(port, V_NIL)),
+    SCM_PROTECT_CLEANUP(h, result = apply(av[1], scm_cons(port, V_NIL)),
                 { wind_pop_cleanup(wf); scm_raise_val(h.exn); });
     wind_pop_cleanup(wf);
     return result;
@@ -2381,7 +2381,7 @@ static val_t prim_with_input_from_file(int ac, val_t *av, void *ud) {
     WindFrame *wf = wind_push_cleanup(restore_stdin_close, &r);
     ExnHandler h; h.prev = current_handler;
     h.saved_jit_depth = jit_depth_save();
-    h.handler_proc = V_FALSE; current_handler = &h;
+    h.handler_proc = V_TRUE; current_handler = &h;   /* cleanup and re-raise */
     val_t result = V_VOID;
     if (setjmp(h.jmp) == 0) { result = apply(av[1], V_NIL); current_handler = h.prev; }
     else { current_handler = h.prev; jit_depth_restore(h.saved_jit_depth); wind_pop_cleanup(wf); scm_raise_val(h.exn); }
@@ -2398,7 +2398,7 @@ static val_t prim_with_output_to_file(int ac, val_t *av, void *ud) {
     WindFrame *wf = wind_push_cleanup(restore_stdout_close, &r);
     ExnHandler h; h.prev = current_handler;
     h.saved_jit_depth = jit_depth_save();
-    h.handler_proc = V_FALSE; current_handler = &h;
+    h.handler_proc = V_TRUE; current_handler = &h;   /* cleanup and re-raise */
     val_t result = V_VOID;
     if (setjmp(h.jmp) == 0) { result = apply(av[1], V_NIL); current_handler = h.prev; }
     else { current_handler = h.prev; jit_depth_restore(h.saved_jit_depth); wind_pop_cleanup(wf); scm_raise_val(h.exn); }
@@ -2561,7 +2561,7 @@ static val_t prim_with_output_to_string(int ac, val_t *av, void *ud) {
     ExnHandler h;
     h.prev = current_handler;
     h.saved_jit_depth = jit_depth_save();
-    h.handler_proc = V_FALSE; current_handler = &h;
+    h.handler_proc = V_TRUE; current_handler = &h;   /* cleanup and re-raise */
     if (setjmp(h.jmp) == 0) {
         apply(av[0], V_NIL);
         current_handler = h.prev;
@@ -2964,7 +2964,7 @@ static val_t prim_call_with_port(int ac, val_t *av, void *ud) {
     ExnHandler h;
     h.prev = current_handler;
     h.saved_jit_depth = jit_depth_save();
-    h.handler_proc = V_FALSE; current_handler = &h;
+    h.handler_proc = V_TRUE; current_handler = &h;   /* cleanup and re-raise */
     bool raised = false; val_t exn_val = V_VOID;
     if (setjmp(h.jmp) == 0) {
         result = apply(proc, scm_cons(port, V_NIL));
@@ -3956,7 +3956,7 @@ static val_t prim_call_with_precision(int ac, val_t *av, void *ud) {
      * continuation escape (#428). */
     WindFrame *wf = wind_push_cleanup(restore_mpfr_prec, &saved);
     ExnHandler h;
-    SCM_PROTECT(h,
+    SCM_PROTECT_CLEANUP(h,
         result = apply_arr(av[1], 0, NULL),
         { wind_pop_cleanup(wf); scm_raise_val(h.exn); });
     wind_pop_cleanup(wf);

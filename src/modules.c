@@ -229,7 +229,7 @@ static Module *load_scheme_module(val_t name, const char *path) {
     val_t result = V_VOID;
     WindFrame *wf = wind_push_cleanup(load_cleanup, &lc);
     ExnHandler h;
-    SCM_PROTECT(h, {
+    SCM_PROTECT_CLEANUP(h, {
         val_t v;
         while (!vis_eof((v = scm_read(port)))) {
             result = eval(v, mod_env);

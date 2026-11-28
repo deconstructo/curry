@@ -26,6 +26,36 @@
   `--with-mpfr` option is removed) and the install docs name it. Install it with
   `apt install libmpfr-dev`, `dnf install mpfr-devel` or `brew install mpfr`.
 
+**Fixed — a continuation escape runs the cleanup of the C-level `with-...` forms (#428)**
+
+- A `call/cc` escape out of `with-output-to-string`, `with-input-from-file`,
+  `with-output-to-file`, `call-with-port`, `call-with-input-file`,
+  `call-with-output-file`, `with-mutex`, `with-assumptions`, `load`,
+  `handler-bind`, `with-restarts` or `call-with-precision` skipped that form's
+  cleanup: stdout stayed redirected, a mutex stayed locked (the next
+  `with-mutex` deadlocked), ports stayed open, the load directory stayed
+  pushed. The cleanup now runs on a normal exit, an exception and an escape.
+  `call-with-input-file` and `call-with-output-file` also close the port when
+  the procedure raises. Still exception-only: `atomically` and the macro
+  transformer environment saves (#433).
+
+**Fixed — `raise-continuable` through the C-level `with-...` forms (#429)**
+
+- `raise-continuable` inside the forms above (except `with-restarts`), and
+  inside the tree-walker's `parameterize`, now returns the handler's value to
+  the raise point, as `dynamic-wind`, `eval` and `guard` already did. Since
+  #407 a returning handler there had been an error (`handler-returned`).
+- `map`, `for-each/par` and `reduce` run sequentially while the calling thread
+  has a `with-exception-handler` active, so a `raise-continuable` in the
+  function returns to its raise point too (the speed-up is lost there; a
+  `guard` does not turn it off). They are unchanged otherwise.
+- The handler now runs with those forms still active, as R7RS says: a handler
+  reached through `with-mutex` runs while the mutex is held, so one that locks
+  the same mutex deadlocks.
+- A handler that leaves by a continuation captured between the raise and its
+  `with-exception-handler` no longer makes a later raise skip that handler.
+- `with-restarts` and `atomically` still unwind to the handler.
+
 ### 1.31.0 - 2026-11-25
 
 **Fixed — an after thunk that raises during an escape ran twice (#425)**
