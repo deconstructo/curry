@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795830756301,
+  "lastUpdate": 1795832175196,
   "repoUrl": "https://github.com/deconstructo/curry",
   "entries": {
     "Benchmark": [
@@ -23183,6 +23183,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "list-build-walk(500k)",
             "value": 84.271,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metanoia@gmail.com",
+            "name": "deconstructo",
+            "username": "deconstructo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "aee74478c1f9006bb5def5efd2f1d8f46c8bd2fb",
+          "message": "Merge pull request #445 from deconstructo/fix/436-439-441-numeric\n\nfix(numeric): quaternion/complex/octonion mixing, MPFR eqv?/max/printing (#436 #439 #441)",
+          "timestamp": "2026-11-28T13:15:03+11:00",
+          "tree_id": "65e55dfdbee6f9fc385f2f356d158f28612d64f6",
+          "url": "https://github.com/deconstructo/curry/commit/aee74478c1f9006bb5def5efd2f1d8f46c8bd2fb"
+        },
+        "date": 1795832173518,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(25)/vm",
+            "value": 21.257,
+            "unit": "ms"
+          },
+          {
+            "name": "fib(22)/tw",
+            "value": 31.362,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(18,12,6)/vm",
+            "value": 5.914,
+            "unit": "ms"
+          },
+          {
+            "name": "tak(16,10,4)/tw",
+            "value": 37.242,
+            "unit": "ms"
+          },
+          {
+            "name": "count-down(3M)/vm",
+            "value": 180.339,
+            "unit": "ms"
+          },
+          {
+            "name": "flonum-loop(1M)",
+            "value": 348.458,
+            "unit": "ms"
+          },
+          {
+            "name": "cont-capture(200k)",
+            "value": 86.474,
+            "unit": "ms"
+          },
+          {
+            "name": "alloc-churn(1M)",
+            "value": 113.824,
+            "unit": "ms"
+          },
+          {
+            "name": "list-build-walk(500k)",
+            "value": 83.013,
             "unit": "ms"
           }
         ]
