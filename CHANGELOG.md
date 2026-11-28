@@ -1,6 +1,6 @@
 # Changelog
 
-### Unreleased
+### 1.33.0 - 2026-11-28
 
 **Fixed: symbolic integration of rational functions with a scaled denominator (#447).** `(∫ (/ (expt x 2) (* 2 x)) x)` returned x²/2 instead of x²/4, `x³/(4x²)` returned x²/2 instead of x²/8, and `x/(3x²+3)` returned ½·ln(1+x²) instead of ⅙·ln(1+x²). Two causes: polynomial division scaled its remainder by the divisor's leading coefficient and left the quotient unscaled, and partial fractions dropped a constant factor of the denominator. The antiderivatives of `x·ln x` and `x²·ln x` went through the same code and were wrong too. `symbolic_tests.scm` (160 assertions) is now registered in ctest.
 
