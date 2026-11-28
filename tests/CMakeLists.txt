@@ -368,7 +368,7 @@ if(BUILD_LLVM)
     # the whole suite this way: CURRY_JIT=force ctest --test-dir build
     foreach(t r7rs r6rs syntax_rules syntax_case dynamic_wind numeric_ext
               actors sexagesimal hash_tombstone string_case jit
-              continuation_expired escape_restores)
+              continuation_expired escape_restores guard_reraise after_thunk_unwind)
         add_test(NAME jit_force_${t}
                  COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/${t}_tests.scm)
         set_tests_properties(jit_force_${t} PROPERTIES ENVIRONMENT "CURRY_JIT=force")
@@ -384,7 +384,7 @@ if(BUILD_LLVM)
                          ENVIRONMENT "CURRY_JIT=force;CURRY_JIT_BACKEND=bytecode")
     foreach(t r7rs r6rs syntax_rules syntax_case dynamic_wind numeric_ext
               actors sexagesimal hash_tombstone string_case jit jit_bytecode
-              continuation_expired escape_restores)
+              continuation_expired escape_restores guard_reraise after_thunk_unwind)
         add_test(NAME jit_bc_force_${t}
                  COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/${t}_tests.scm)
         set_tests_properties(jit_bc_force_${t} PROPERTIES
