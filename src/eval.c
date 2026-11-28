@@ -137,7 +137,9 @@ static val_t eval_call_cc(val_t proc) {
     int   saved_jit_depth = jit_depth_save();
     ExnHandler *saved_handler = current_handler;     /* see prim_call_cc */
     int   saved_hcount = vm ? vm->handler_count : 0;
+    cc_push(cont, (uintptr_t)__builtin_frame_address(0));
     if (setjmp(*(jmp_buf *)cont->jmpbuf) != 0) {
+        cc_pop(cont);
         jit_depth_restore(saved_jit_depth);
         current_handler = saved_handler;
         if (vm) vm->handler_count = saved_hcount;
@@ -152,7 +154,9 @@ static val_t eval_call_cc(val_t proc) {
          * that folding and guarantees an ldr instruction. */
         return *(volatile val_t *)&cont->result;
     }
-    return apply(proc, make_pair(vptr(cont), V_NIL));
+    val_t r = apply(proc, make_pair(vptr(cont), V_NIL));
+    cc_pop(cont);
+    return r;
 }
 
 
@@ -227,6 +231,7 @@ typedef struct {
     val_t var, clauses, env;
     void *jmpbuf;       /* heap-allocated jmp_buf, set in the guard's frame (as call/cc does) */
     void *wind_top;     /* current_wind when the guard was entered */
+    uintptr_t frame_mark; /* the guard's stack position, for cc_unwind_to */
     val_t value;        /* of the clause that applied */
 } GuardInPlace;
 
@@ -245,6 +250,7 @@ static val_t guard_in_place(int argc, val_t *argv, void *ud) {
     while (current_handler && current_handler->handler_proc == V_TRUE)
         current_handler = current_handler->prev;
     wind_unwind_to((WindFrame *)g->wind_top);
+    cc_unwind_to(g->frame_mark);
     longjmp(*(jmp_buf *)g->jmpbuf, 1);
 }
 
@@ -339,6 +345,7 @@ static __attribute__((noinline)) val_t eval_guard(val_t rest, val_t env) {
     gip->var = var; gip->clauses = clauses; gip->env = env;
     gip->jmpbuf = gc_alloc_raw_pinned(sizeof(jmp_buf));
     gip->wind_top = current_wind; gip->value = V_VOID;
+    gip->frame_mark = (uintptr_t)&h;
     Primitive *gp = CURRY_NEW(Primitive);
     gp->hdr.type = T_PRIMITIVE; gp->hdr.flags = 0;
     gp->name = "guard"; gp->min_args = 1; gp->max_args = 1;
@@ -1648,6 +1655,7 @@ tail:
 
         if (vis_cont(proc)) {
             Continuation *cont = as_cont(proc);
+            cc_check_live(cont);
             /* Matches prim_values' own convention exactly: exactly one
              * value stays unboxed, 0 or 2+ values become a T_VALUES
              * object -- so (k) delivers zero values, same as (values). */
@@ -1658,6 +1666,7 @@ tail:
              * eval_call_cc's volatile reload sees the correct value after longjmp. */
             __asm__ volatile("" ::: "memory");
             wind_unwind_to((WindFrame *)cont->wind_top);
+            cc_unwind_to(cont->frame_mark);
             longjmp(*(jmp_buf *)cont->jmpbuf, 1);
         }
 

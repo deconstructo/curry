@@ -442,11 +442,13 @@ val_t stm_or_else(val_t thunk1, val_t thunk2) {
     tx->wlen     = saved_wlen;
     tx->read_ver = saved_read_ver;
     tx->retry_jmp = saved_retry;
+    cc_unwind_to((uintptr_t)saved_retry);
     longjmp(*saved_retry, RETRY_SIG);
 }
 
 void stm_retry(void) {
     if (!current_tx)
         scm_raise(V_FALSE, "retry called outside atomically");
+    cc_unwind_to((uintptr_t)current_tx->retry_jmp);
     longjmp(*current_tx->retry_jmp, RETRY_SIG);
 }

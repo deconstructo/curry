@@ -2862,7 +2862,9 @@ static val_t prim_call_cc(int ac, val_t *av, void *ud) {
      * current_handler pointing at them (#377). */
     ExnHandler *saved_handler = current_handler;
     int   saved_hcount = vm->handler_count;
+    cc_push(cont, (uintptr_t)__builtin_frame_address(0));
     if (setjmp(*(jmp_buf *)cont->jmpbuf) != 0) {
+        cc_pop(cont);
         current_handler   = saved_handler;
         vm->handler_count = saved_hcount;
         /* Continuation was invoked — restore VM state and return captured value.
@@ -2876,7 +2878,9 @@ static val_t prim_call_cc(int ac, val_t *av, void *ud) {
         return *(volatile val_t *)&cont->result;
     }
     val_t cont_val = vptr(cont);
-    return apply_arr(proc, 1, &cont_val);
+    val_t r = apply_arr(proc, 1, &cont_val);
+    cc_pop(cont);
+    return r;
 }
 
 /* (call/cc proc) for the VM's OP_CALL_CC. */

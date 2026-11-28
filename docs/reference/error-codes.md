@@ -50,6 +50,7 @@ plumbing is required.
 | `index-out-of-range` | A numeric index was outside a sequence's valid bounds | `vector-ref`, `vector-set!`, `substring` |
 | `stack-overflow` | The VM's value stack, call-frame stack, or exception-handler stack was exhausted | `vm.c` |
 | `handler-returned` | A `with-exception-handler` handler returned from a non-continuable raise (`raise`, `error`, a primitive's error); R7RS 6.11's secondary exception | `OP_HANDLER_RETURNED` (`vm.c`), `prim_with_exception_handler` (`builtins.c`) |
+| `continuation-expired` | A continuation was invoked after its `call/cc` returned, or from another thread; curry's continuations are escape-only (#443) | `cc_check_live` (`runtime.c`), called where `apply`/`eval` invoke a continuation |
 | `interrupted` | A cross-thread interrupt request (e.g. the Jupyter kernel's `interrupt_request`) stopped a running computation | `vm.c`'s dispatch-loop safepoint, `src/interrupt.c` |
 
 Codes are pre-interned symbols (`EC_WRONG_TYPE_ARGUMENT`, etc.), declared

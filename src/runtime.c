@@ -104,6 +104,37 @@ void wind_unwind_to(WindFrame *target) {
     }
 }
 
+/* Live call/cc frames on this thread, newest (deepest) first (#443). A
+ * frame mark is a stack position: on every supported target the stack grows
+ * down, so a frame deeper than the target of a longjmp has a smaller mark
+ * and is gone once the jump lands. Only positions are compared; no stack
+ * address is ever dereferenced through this list. */
+static CURRY_THREAD_LOCAL Continuation *current_cc = NULL;
+
+void cc_push(Continuation *cont, uintptr_t frame_mark) {
+    cont->frame_mark = frame_mark;
+    cont->cc_prev    = current_cc;
+    current_cc       = cont;
+}
+
+void cc_unwind_to(uintptr_t target_mark) {
+    while (current_cc && current_cc->frame_mark < target_mark)
+        current_cc = current_cc->cc_prev;
+}
+
+void cc_pop(Continuation *cont) {
+    cc_unwind_to(cont->frame_mark);
+    if (current_cc == cont) current_cc = cont->cc_prev;
+}
+
+void cc_check_live(Continuation *cont) {
+    for (Continuation *c = current_cc; c; c = c->cc_prev)
+        if (c == cont) return;
+    scm_raise_code(EC_CONTINUATION_EXPIRED,
+                   "continuation invoked after its call/cc returned "
+                   "(curry continuations are escape-only)");
+}
+
 WindFrame *wind_push_cleanup(void (*fn)(void *), void *arg) {
     WindFrame *wf = gc_alloc_raw_pinned(sizeof(WindFrame));
     wf->before        = V_VOID;
@@ -209,6 +240,7 @@ void scm_raise_val(val_t exn) {
     /* Step 2: unwind to the nearest ExnHandler (guard / handler-case). */
     if (current_handler) {
         current_handler->exn = exn;
+        cc_unwind_to((uintptr_t)current_handler);
         longjmp(current_handler->jmp, 1);
     }
     /* Unhandled: print and abort. */
@@ -415,12 +447,14 @@ val_t apply(val_t proc, val_t args) {
     }
     if (vis_cont(proc)) {
         Continuation *cont = as_cont(proc);
+        cc_check_live(cont);
         /* Matches prim_values' own convention exactly: exactly one
          * value stays unboxed, 0 or 2+ values become a T_VALUES object
          * -- so (k) delivers zero values, same as (values). */
         cont->result = (vis_pair(args) && vis_nil(vcdr(args))) ? vcar(args) : make_values_from_list(args);
         __asm__ volatile("" ::: "memory");
         wind_unwind_to((WindFrame *)cont->wind_top);
+        cc_unwind_to(cont->frame_mark);
         longjmp(*(jmp_buf *)cont->jmpbuf, 1);
     }
     if (vis_param(proc)) {

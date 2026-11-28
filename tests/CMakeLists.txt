@@ -52,6 +52,7 @@ add_test(NAME after_thunk_unwind COMMAND curry --clear-cache ${CMAKE_CURRENT_SOU
 add_test(NAME c_form_escape COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/c_form_escape_tests.scm)
 add_test(NAME c_form_escape_load COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/c_form_escape/main.scm)
 add_test(NAME raise_continuable COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/raise_continuable_tests.scm)
+add_test(NAME continuation_expired COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/continuation_expired_tests.scm)
 add_test(NAME c_stack_overflow COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/c_stack_overflow_tests.scm)
 set_tests_properties(c_stack_overflow PROPERTIES TIMEOUT 120)
 add_test(NAME list_traversal_arguments COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/list_traversal_arguments_tests.scm)
@@ -365,7 +366,8 @@ if(BUILD_LLVM)
     # failure here that the plain run does not have is a JIT bug. To run
     # the whole suite this way: CURRY_JIT=force ctest --test-dir build
     foreach(t r7rs r6rs syntax_rules syntax_case dynamic_wind numeric_ext
-              actors sexagesimal hash_tombstone string_case jit)
+              actors sexagesimal hash_tombstone string_case jit
+              continuation_expired)
         add_test(NAME jit_force_${t}
                  COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/${t}_tests.scm)
         set_tests_properties(jit_force_${t} PROPERTIES ENVIRONMENT "CURRY_JIT=force")
@@ -380,7 +382,8 @@ if(BUILD_LLVM)
     set_tests_properties(jit_bytecode_exit PROPERTIES
                          ENVIRONMENT "CURRY_JIT=force;CURRY_JIT_BACKEND=bytecode")
     foreach(t r7rs r6rs syntax_rules syntax_case dynamic_wind numeric_ext
-              actors sexagesimal hash_tombstone string_case jit jit_bytecode)
+              actors sexagesimal hash_tombstone string_case jit jit_bytecode
+              continuation_expired)
         add_test(NAME jit_bc_force_${t}
                  COMMAND curry --clear-cache ${CMAKE_CURRENT_SOURCE_DIR}/${t}_tests.scm)
         set_tests_properties(jit_bc_force_${t} PROPERTIES
